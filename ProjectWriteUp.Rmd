@@ -1,0 +1,117 @@
+---
+title: "Prediction Assignment"
+author: "Ziwei Zhou"
+date: "August 13, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(cache=TRUE,eval=FALSE)
+setwd("~/Documents/OpenCourse/Practical_MachineLearning/FinalProject")
+```
+## Loading Data
+```{r, cache=T}
+pml_testing <- read.csv("pml-testing.csv",na.strings="#DIV/0!")
+pml_training <- read.csv("pml-training.csv",na.strings="#DIV/0!")
+```
+
+## Data Cleaning
+
+### Explore Dataset
+First, I inspect the dataset by running:
+```{r, eval=FALSE,cache=T}
+str(pml_training)
+```
+
+From the result, I found that quite a few variables like "max_roll_belt" contains NA values. Therefore, I decided to calculate the missing data rate with following command:
+```{r,echo=TRUE, eval=FALSE,cache=T}
+NARate <- apply(pml_training,2,function(x) (sum(is.na(x)/length(x))))
+NNARate_testing <- apply(pml_testing,2,function(x) (sum(is.na(x)/length(x))))
+```
+This command will count NA data in each column and divide by the total length, therefore gave a NA rate. All variables contain missing data have same missing rate: 97.9%. While all other variables have 0 missing rate. Therefore, I think its safe to remove these columns. 
+
+### Removing Columns with high NA rate
+```{r,cache=T,eval=FALSE}
+keep_train <- names(NARate[NARate<0.8])
+keep_test <- names(NARate_testing)[NARate_testing<0.8]
+pml_training_2 <- pml_training[,keep_train]
+pml_testing_2 <- pml_testing[,keep_test]
+```
+Check the dataset again
+```{r,eval=FALSE,cache=T}
+str(pml_training_2)
+str(pml_testing_2)
+```
+I also found some varaible with value #DIV/0, And for this reason, these variable are marked as factor instead of numeric, therefore, we need to mark these DIV/0 as NA, this is done by rewriting the read.csv command. 
+
+### Drop useless variables
+Then we need to drop variables that is useless for the prediction, which shows as factor variable, therefore, we only need to preserve the numerical one
+```{r,cache=T}
+pml_training_3 <- pml_training_2[,sapply(pml_training_2,is.numeric)]
+pml_training_3$classe <- pml_training_2$classe
+pml_testing_3 <- pml_testing_2[,sapply(pml_testing_2,is.numeric)]
+```
+
+Also, X, timestamp, window is useless
+```{r,cache=T}
+pml_training_cleaned <- pml_training_3[,5:dim(pml_training_3)[2]]
+pml_testing_cleaned <- pml_testing_3[,5:dim(pml_testing_3)[2]]
+```
+Now the training set and testing set contains same variables and have same dimensions.
+
+### Data splitting
+```{r,cache=T}
+inTrain <- createDataPartition(pml_training_cleaned$classe, p=0.70, list=F)
+training <-  pml_training_cleaned[inTrain,]
+cv_set <- pml_training_cleaned[-inTrain,]
+testing <- pml_testing_cleaned
+```
+
+## Model Fitting
+Now its ready to fit models, since its a classification problem. And since the dataset is large and the training process can take a very long time. I decide to use and compare two algorithm: Random Forest, Gradient Boosting Machine. The accuracy result proves that Random Forest is a better algorithm in this case.
+
+### Random Forest
+#### Model Fitting
+```{r,cache=TRUE}
+library(doMC)
+registerDoMC(cores = 4) # Parallizing
+library(caret)
+rf_fit <- train(classe~.,data=training,method='rf')
+save(rf_fit,file="rf_fit.rda") #Save for future use
+```
+
+#### Accuracy on cross validation set
+
+```{r,cache=T}
+rf_predict <- predict(rf_fit, cv_set)
+rf_confMat <- confusionMatrix(cv_set$classe, rf_predict) 
+rf_confMat
+```
+
+confusionMatrix shows that the accuracy on cross-validation dataset is 99.07%, which is prety good
+
+#### Accuracy on test set
+```{r,cache=T}
+# Predict using the testing dataset without last column "problem_id"
+rf_predict_test <- predict(rf_fit,testing[,-dim(testing)[2]])
+```
+
+### GBM algorithm
+
+```{r,cache=TRUE}
+library(doMC)
+registerDoMC(cores = 4) # Parallizing
+library(caret)
+gbm_fit <- train(classe~.,data=training,method='gbm')
+save(gbm_fit,file="gbm_fit.rda") #Save for future use
+```
+
+#### Accuracy on cross validation set
+
+```{r,cache=TRUE}
+gbm_predict <- predict(gbm_fit, cv_set)
+gbm_confMat <- confusionMatrix(cv_set$classe, gbm_predict) 
+gbm_confMat$overall[1]
+```
+GBM algorithm shows an accuracy of 93.1% on cross-validation set, which is not better than RF.
+Since model fitting is quite computational intense. I'll stick on RF model.
